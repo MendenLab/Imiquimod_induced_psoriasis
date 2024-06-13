@@ -448,3 +448,38 @@ for (gene in selected_genes){
 p <- ggplot(data = time_data, aes(x=factor(time, levels=c("start", "mid", "end")), y=!!sym(gene), group=1))+geom_line(linetype="dashed")+geom_point()+theme_bw()+ggtitle("VST counts from Day 0 to Day 28")+ylim(0,20)
 print(p)
 }
+
+
+## Pooling of Patient1 FL with Patient3 NL and comparing to Non-lesional
+# Start points
+aldara_start <- rbind(start1_FL_Aldara, start3_NL_Aldara)
+pooled_start <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = aldara_start, Brain_aldara_counts = BRAIN_Aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN)
+aldara_end <- rbind(end1_FL_Aldara, end3_NL_Aldara)
+pooled_end <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = aldara_end, Brain_aldara_counts = BRAIN_Aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN)
+volcanoPlot(pooled_end, fdr=0.05, l2fc_cutoff = 1, title = "")
+enrichment_pooled_start <- computeEnrichments(comparison = pooled_start,pathways = shorter_pathways, "pooled_start")
+enrichment_pooled_end <- computeEnrichments(comparison = pooled_end, pathways = shorter_pathways, "pooled_end")
+
+## Aldara End comparisons
+Aldara_end_samples <- aldara_samples %>% filter(time == "end")
+Aldara_end_counts <- Aldara_raw_count_filt[,Aldara_end_samples$sampleID]
+y <- DGEList(counts = Aldara_end_counts, samples = Aldara_end_samples, genes = rownames(Aldara_end_counts))
+Aldara_end_samples$group <- 0
+Aldara_end_samples <- Aldara_end_samples %>% mutate(group = if_else(label == "3endFL", 1, group))
+Aldara_end_samples$group <- as.factor(Aldara_end_samples$group)
+grouping <- Aldara_end_samples$group
+design <- model.matrix(~0 + grouping)
+keep <- filterByExpr(y, design = design)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+y <- estimateDisp(y, design=design)
+fit <- glmFit(y, design=design)
+my.contrast <- makeContrasts(endFL3vsendRest = grouping1 - grouping0,levels = colnames(design))
+lrt <- glmLRT(fit, contrast = my.contrast[,"endFL3vsendRest"])
+end_result <- data.frame(lrt$table)
+end_result$padj <- p.adjust(end_result$PValue, method = "BH")
+end_result <-  end_result %>% rename(log2FoldChange=logFC)
+end_result <- end_result %>% rownames_to_column(var = "ensembl_id")
+end_result$ensembl_id <- gsub("\\..*", "", end_result$ensembl_id)
+end_result <- merge(end_result, geneDescription[,c("external_gene_name", "ensembl_gene_id")], by.x ="ensembl_id", by.y="ensembl_gene_id") %>% rename(Gene_name = external_gene_name)
+volcanoPlot(end_result, fdr = 0.05, l2fc_cutoff = 1, title = "Pat3FL end vs. Pat3NL end and Pat1FL end")
