@@ -1,4 +1,3 @@
-library(DESeq2)
 library(tidyverse)
 library(readxl)
 library(edgeR)
@@ -11,8 +10,11 @@ library(stringi)
 library(assertable)
 library(dplyr)
 library(circlize)
+library(DESeq2)
 library(biomaRt)
 library(dplyr)
+library(enrichplot)
+setwd("/Users/martin.meinel/Documents/Publication Code/Aldara_Recall")
 
 volcanoPlotWithList <- function(result, fdr, l2fc_cutoff=1, title, gene_list){
   #'
@@ -35,77 +37,6 @@ volcanoPlotWithList <- function(result, fdr, l2fc_cutoff=1, title, gene_list){
     ggtitle(title)
 }
 
-volcanoPlot.padj.sorted <- function(result, fdr, l2fc_cutoff=1, title){
-  #'
-  #' @param result DESeq2 results table with log2Foldchange, padj and Gene_name as columns
-  #' @param fdr determines fdr cutoff
-  #' @param l2fc_cutoff determines log2Foldchange cutoff
-  #' @param title Determines title of the plot
-  #'
-  assert_colnames(result, colnames=c("padj", "log2FoldChange", "Gene_name"), only_colnames = F, quiet = T)
-  # Split it in two parts and merge then
-  
-  # Sort the data frame by padj for upregulated genes
-  df_upregulated <- result%>% filter(log2FoldChange > l2fc_cutoff & -log10(padj) > -log10(fdr))
-  df_upregulated_sorted <- df_upregulated[order(df_upregulated$padj), ]
-  
-  # Sort the data frame by padj for downregulated genes
-  df_downregulated <- result %>%filter(log2FoldChange < -l2fc_cutoff & -log10(padj) > -log10(fdr))
-  df_downregulated_sorted <- df_downregulated[order(df_downregulated$padj), ]
-  
-  # Subset the top 20 most significant genes for upregulated and downregulated separately
-  top_twenty_upregulated <- head(df_upregulated_sorted, 20)
-  top_twenty_downregulated <- head(df_downregulated_sorted, 20)
-  
-  # Create the volcano plot
-  volcano_plot <- ggplot(data = result, mapping = aes(x=log2FoldChange,y=-log10(padj)))+
-    geom_point(data = result %>% filter (abs(log2FoldChange <= l2fc_cutoff) | -log10(padj) <= -log10(fdr)), color="darkgrey")+
-    geom_point(data = result %>% filter(log2FoldChange > l2fc_cutoff & -log10(padj) > -log10(fdr)), color="tomato3")+
-    geom_point(data = result %>% filter(log2FoldChange < -l2fc_cutoff & -log10(padj) > -log10(fdr)), color="seagreen4")+
-    geom_vline(xintercept = -l2fc_cutoff, linetype="dashed")+
-    geom_vline(xintercept = l2fc_cutoff, linetype="dashed")+
-    geom_hline(yintercept = -log10(fdr), linetype="dashed")+
-    theme_bw()+
-    ggtitle(title)
-  
-  # Add labels for the top 20 upregulated genes
-  volcano_plot_with_labels <- volcano_plot +
-    geom_text_repel(data = top_twenty_upregulated, aes(label = Gene_name), size=1.75, max.overlaps = Inf)
-  
-  # Add labels for the top 20 downregulated genes
-  volcano_plot_with_labels <- volcano_plot_with_labels +
-    geom_text_repel(data = top_twenty_downregulated, aes(label = Gene_name), size=1.75,  max.overlaps = Inf)
-
-  # Display the plot
-  return(volcano_plot_with_labels)
-}
-
-
-
-volcanoPlot <- function(result, fdr, l2fc_cutoff=1, title){
-  #'
-  #' @param result DESeq2 results table with log2Foldchange, padj and Gene_name as columns
-  #' @param fdr determines fdr cutoff
-  #' @param l2fc_cutoff determines log2Foldchange cutoff
-  #' @param title Determines title of the plot
-  #'
-  
-  #'
-  assert_colnames(result, colnames=c("padj", "log2FoldChange", "Gene_name"), only_colnames = F, quiet = T)
-  ggplot(data = result, mapping = aes(x=log2FoldChange,y=-log10(padj)))+
-    geom_point(data = result %>% filter (abs(log2FoldChange <= l2fc_cutoff) | -log10(padj) <= -log10(fdr)), color="darkgrey")+
-    geom_point(data = result %>% filter(log2FoldChange > l2fc_cutoff & -log10(padj) > -log10(fdr)), color="tomato3")+
-    geom_point(data = result %>% filter(log2FoldChange < -l2fc_cutoff & -log10(padj) > -log10(fdr)), color="seagreen4")+
-    geom_text_repel(data = result %>% filter(abs(log2FoldChange) > l2fc_cutoff & -log10(padj) > -log10(fdr)), aes(label=Gene_name), size=2)+
-    geom_vline(xintercept = -l2fc_cutoff, linetype="dashed")+
-    geom_vline(xintercept = l2fc_cutoff, linetype="dashed")+
-    geom_hline(yintercept = -log10(fdr), linetype="dashed")+
-    theme_bw()+
-    ggtitle(title)
-}
-
-# Filtered_named_TPM_raw_counts
-
 # Read Aldara Recall data
 Aldara_raw_count <- readRDS("./Aldara_counts.rds")
 Aldara_raw_count$ensembl_id <- gsub("(ENSG[0-9]+).*","\\1", as.character(Aldara_raw_count$ensembl_id))
@@ -120,7 +51,6 @@ sample_combi <- sample_combi[order(sample_combi$sample),]
 aldara_samples <- sample_combi %>% 
   dplyr::mutate(dataset = "Aldara")%>% 
   dplyr::rename(sampleID = sample)
-
 
 # Read in BRAIN
 BRAIN_SummarizedExperiment <- readRDS("./dds_highQual_Sexandbatchcorrected_v04.rds")
@@ -236,31 +166,14 @@ geneDescription <- getBM(attributes=c("ensembl_gene_id",
                          mart=ensembl,
                          useCache = FALSE)
 
-
-start1_FL_Aldara <- aldara_samples %>%
-  dplyr::filter(t_area_p == "start1_FL") %>%
-  dplyr::select(sampleID, dataset)
-
 #end1_FL: 
 end1_FL_Aldara <- aldara_samples %>% 
   dplyr::filter(t_area_p == "end1_FL") %>% 
   dplyr::select(sampleID, dataset)
 
-start3_FL_Aldara <- aldara_samples %>%
-  dplyr::filter(t_area_p == "start3_FL") %>%
-  dplyr::select(sampleID, dataset)
-
-mid3_FL_Aldara <- aldara_samples %>%
-  dplyr::filter(t_area_p == "mid3_FL") %>%
-  dplyr::select(sampleID, dataset)
-
 #end3_FL: End of Former lesional Patient
 end3_FL_Aldara <- aldara_samples %>% 
   dplyr::filter(t_area_p == "end3_FL") %>% 
-  dplyr::select(sampleID, dataset)
-
-start3_NL_Aldara <- aldara_samples %>%
-  dplyr::filter(t_area_p == "start3_NL") %>%
   dplyr::select(sampleID, dataset)
 
 end3_NL_Aldara <- aldara_samples %>%
@@ -275,7 +188,6 @@ aldara_brain_comparison <- function(brain_samples, aldara_sample, Brain_aldara_c
   sorted_aldara_brain_counts <- BRAIN_Aldara_counts[,colnames(BRAIN_Aldara_counts) %in% aldara_brain_samples$sampleID]
   sorted_aldara_brain_counts <- sorted_aldara_brain_counts[,order(colnames(sorted_aldara_brain_counts))]
   assert(colnames(sorted_aldara_brain_counts) == aldara_brain_samples$sampleID)
-  
   # Create the DGE
   y <- DGEList(counts = sorted_aldara_brain_counts,
                genes = genes,
@@ -293,7 +205,7 @@ aldara_brain_comparison <- function(brain_samples, aldara_sample, Brain_aldara_c
                                   FDR < 0.05 & logFC < 1 ~ "down",
                                   T ~ "no"))%>%
     dplyr::inner_join(genedata, by = c("ensembl_id" = "ensembl_gene_id"))
-  result_all <- result_all %>% rename(padj =FDR, log2FoldChange=logFC, Gene_name=external_gene_name)
+  result_all <- result_all %>% dplyr::rename(padj=FDR, log2FoldChange=logFC, Gene_name=external_gene_name)
   return(result = result_all)
 }
 
@@ -307,32 +219,19 @@ computeEnrichments <- function(comparison, pathways, plt_title){
   # Computation
   fgsea_result <- fgsea(pathways, signed_p_values)
   # Get the lower limits
-  lower_limit <- round(min(-0.2, min(fgsea_result$ES) - 0.1), 1)
-  pdf(paste("/Users/martin.meinel/Documents/Publication Code/Aldara_Recall/Figures/Enrichments/",plt_title,"_PSO.pdf", sep = ""), width=6, height = 6)
-  p <- plotEnrichment(pathways$PSO, signed_p_values)+theme(text=element_text(size=8))+scale_y_continuous(breaks=seq(lower_limit,1.1,0.1), limits = c(lower_limit, 1.0), labels = scales::label_number(accuracy = 0.1))+theme(panel.border = element_blank(), panel.grid.major = element_blank(),
-                                                                                                                                                         panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+  p <- plotEnrichment(pathways$PSO, signed_p_values)+theme(text=element_text(size=8))+scale_y_continuous(breaks=seq(-0.5,1.1,0.1), limits = c(-0.5, 1.0), labels = scales::label_number(accuracy = 0.1))+theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
   print(p)
-  dev.off()
-  pdf(paste("/Users/martin.meinel/Documents/Publication Code/Aldara_Recall/Figures/Enrichments/",plt_title,"_ICD.pdf", sep = ""), width = 6, height = 6)
-  p2 <- plotEnrichment(pathways$ICD, signed_p_values)+theme(text=element_text(size=8))+scale_y_continuous(breaks=seq(lower_limit,1.1,0.1), limits = c(lower_limit, 1.0), labels = scales::label_number(accuracy = 0.1))+theme(panel.border = element_blank(), panel.grid.major = element_blank(),
-                                                                                                                                                                panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+  p2 <- plotEnrichment(pathways$ICD, signed_p_values)+theme(text=element_text(size=8))+scale_y_continuous(breaks=seq(-0.2,1.1,0.1), limits = c(-0.2, 1.0), labels = scales::label_number(accuracy = 0.1))+theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
   print(p2)
-  dev.off()
   return(fgsea_result)
 }
 
 #### Short Aldara - Brain Comparisons
-Pat1FL_Brain_start <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = start1_FL_Aldara, 
-                                              Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
 Pat1FL_Brain_end <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = end1_FL_Aldara, 
-                                            Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
-Pat3NL_Brain_start <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = start3_NL_Aldara, 
-                                              Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
+                                            Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN)
 Pat3NL_Brain_end <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = end3_NL_Aldara, 
-                                            Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
-Pat3FL_Brain_start <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = start3_FL_Aldara, 
-                                              Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
-Pat3FL_Brain_mid <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = mid3_FL_Aldara, 
                                             Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
 Pat3FL_Brain_end <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = end3_FL_Aldara, 
                                             Brain_aldara_counts = Brain_aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN) 
@@ -357,26 +256,16 @@ design <- model.matrix(~0+TPA)
 y <- calcNormFactors(y)
 # Important to take the square of BVC for dispersion
 fit <- glmFit(y, design = design, dispersion = BCV**2)
-my.contrasts <- makeContrasts(P1end_start = TPAend1_FL - TPAstart1_FL, P3end_start = TPAend3_FL - TPAstart3_FL, P3end_P1end = TPAend3_FL - TPAend1_FL ,levels = design)
+my.contrasts <- makeContrasts(P3end_P1end = TPAend3_FL - TPAend1_FL, P3endFL_P3_end_NL = TPAend3_FL - TPAend3_NL,levels = design)
  # Different comparisons
-Pat1_end_start <- glmLRT(fit, contrast = my.contrasts[,"P1end_start"])
-Pat1_end_start <- Pat1_end_start <- topTags(Pat1_end_start, n=length(Aldara_raw_count_filt$MUC20488), adjust.method = "BH")$table
-
-Pat3_FL_end_start <- glmLRT(fit, contrast = my.contrasts[, "P3end_start"])
-Pat3_FL_end_start <- topTags(Pat3_FL_end_start, n=length(Aldara_raw_count_filt$MUC20488), adjust.method = "BH")$table
-
 Pat3_FL_end_Pat1_FL_end <- glmLRT(fit, contrast = my.contrasts[, "P3end_P1end"])
 Pat3_FL_end_Pat1_FL_end <- topTags(Pat3_FL_end_Pat1_FL_end, n=length(Aldara_raw_count_filt$MUC20488),adjust.method = "BH")$table
 
-Pat1_end_start <- data.frame(merge(Pat1_end_start, gene_info[,c("Gene_name", "ensembl_id")], by.x="genes", by.y="ensembl_id")) %>% dplyr::rename(log2FoldChange=logFC, padj=FDR)
-Pat3_FL_end_start <- data.frame(merge(Pat3_FL_end_start, gene_info[,c("Gene_name", "ensembl_id")], by.x="genes", by.y="ensembl_id")) %>% dplyr::rename(log2FoldChange=logFC, padj=FDR)
+Pat3_FL_end_Pat3_NL_end <- glmLRT(fit, contrast = my.contrasts[, "P3endFL_P3_end_NL"])
+Pat3_FL_end_Pat3_NL_end <- topTags(Pat3_FL_end_Pat3_NL_end, n=length(Aldara_raw_count_filt$MUC20488), adjust.method = "BH")$table
+
 Pat3_FL_end_Pat1_FL_end <- data.frame(merge(Pat3_FL_end_Pat1_FL_end, gene_info[,c("Gene_name", "ensembl_id")], by.x="genes", by.y="ensembl_id"))%>% dplyr::rename(log2FoldChange=logFC, padj=FDR)
-
-# Figure 2A
-volcanoPlot.padj.sorted(Pat1_end_start, fdr = 0.05, title="Patient 1")
-volcanoPlot.padj.sorted(Pat3_FL_end_start, fdr = 0.05, title="Patient 3")
-
-
+Pat3_FL_end_Pat3_NL_end <- data.frame(merge(Pat3_FL_end_Pat3_NL_end, gene_info[,c("Gene_name", "ensembl_id")], by.x="genes", by.y="ensembl_id")) %>% dplyr::rename(log2FoldChange=logFC, padj=FDR)
 
 # --------------------- ENRICHMENTS HERE --------------------------------------
 # LOAD GENE SETS FOR PSORIASIS, ICD AND TRMS
@@ -399,87 +288,11 @@ shorter_ICD_names <- shorter_ICD_names$hgnc_symbol
 shorter_pathways$ICD <- shorter_ICD_names
 
 ### All enrichments
-patient1_start_enrichment <- computeEnrichments(Pat1FL_Brain_start, shorter_pathways, "Pat1FL_start")
-# Figure 2B
+# Figure 1D and Supplementary Figure 1B
 patient1_end_enrichment <- computeEnrichments(Pat1FL_Brain_end, shorter_pathways, "Pat1FL_end")
-patient3_start_enrichmentNL <- computeEnrichments(Pat3NL_Brain_start, shorter_pathways, "Pat3NL_start")
 patient3_end_enrichmentNL <- computeEnrichments(Pat3NL_Brain_end, shorter_pathways, "Pat3NL_end")
-patient3_start_enrichmentFL <- computeEnrichments(Pat3FL_Brain_start, shorter_pathways, "Pat3FL_start")
-patient3_mid_enrichmentFL <- computeEnrichments(Pat3FL_Brain_mid, shorter_pathways, "Pat3FL_mid")
-# Figure 2B
 patient3_end_enrichmentFL <- computeEnrichments(Pat3FL_Brain_end, shorter_pathways, "Pat3FL_end")
 
-# Figure 2C Here
+# Supllementary Figure 1c here
 volcanoPlotWithList(Pat3_FL_end_Pat1_FL_end, l2fc_cutoff = 1, fdr = 0.05, title="Pat3 end vs Pat1 end", gene_list = pso_genes)
-
-# Figure 2 D
-# Extract genes which are differentially expressed between the end of Patient1FL and end of Patient3 FL
-significant_pso_genes <- Pat3_FL_end_Pat1_FL_end %>% filter(padj < 0.05 & log2FoldChange > 1 & Gene_name %in% pso_genes) %>% dplyr::select(Gene_name)
-dds_Aldara <- DESeqDataSetFromMatrix(countData = round(Aldara_raw_count_filt), colData = sample_combi, design = ~1)
-dds_Aldara <- DESeq(dds_Aldara)
-vst_Aldara <- varianceStabilizingTransformation(dds_Aldara)
-vst_Aldara <- assay(vst_Aldara)
-vst_Aldara <- data.frame(vst_Aldara)
-vst_Aldara$ensembl_id <- rownames(vst_Aldara)
-vst_Aldara <- merge(vst_Aldara, gene_info[c("ensembl_id", "Gene_name")], by="ensembl_id")
-dim(vst_Aldara) # 17153 x 9
-
-vst_Aldara_pso <- data.frame(vst_Aldara) %>% filter(Gene_name %in% significant_pso_genes$Gene_name)
-rownames(vst_Aldara_pso) <- vst_Aldara_pso$Gene_name
-vst_Aldara_pso$Patient1 <- vst_Aldara_pso$MUC20494 - vst_Aldara_pso$MUC20493
-vst_Aldara_pso$Patient3 <- vst_Aldara_pso$MUC20490 - vst_Aldara_pso$MUC20488
-vst_Aldara_pso_Heatmap <- vst_Aldara_pso %>% dplyr::select(c(Patient1, Patient3))
-vst_Aldara_pso_Heatmap <- data.frame(vst_Aldara_pso_Heatmap)
-vst_Aldara_pso_Heatmap <- vst_Aldara_pso_Heatmap[order(vst_Aldara_pso_Heatmap$Patient3, decreasing = T),,drop=F]
-Heatmap(data.matrix(vst_Aldara_pso_Heatmap), col = colorRamp2(c(-5, 0, 5), c("blue", "white", "red")), show_row_dend = F, show_column_dend = F, cluster_rows = F, row_names_gp = gpar(fontsize = 6),
-        height = unit(10, "cm"), width = unit(5, "mm"),column_names_gp = gpar(fontsize=6), heatmap_legend_param = list(title="Difference between end and start of treatment [vst counts]"))
-
-# Figure 2 E
-selected_genes <- c("KRT6C", "LCE3C", "HRNR", "IL19", "CXCL8", "TNIP3", "KLK13", "TMPRSS11D", "NOS2", "TCN1")
-vst_Aldara_time <- data.frame(vst_Aldara) %>% filter(Gene_name %in% selected_genes)
-rownames(vst_Aldara_time) <- vst_Aldara_time$Gene_name
-vst_Aldara_time <- vst_Aldara_time %>% dplyr::select(c(MUC20488, MUC20490, MUC20492))
-time_data <- t(vst_Aldara_time)
-time_data <- data.frame(time_data)
-time_data$sample <- rownames(time_data)
-time_data <- merge(time_data, sample_combi[,c("sample","time")], by="sample")
-time_data <- time_data[c(1,3,2),]
-for (gene in selected_genes){
-p <- ggplot(data = time_data, aes(x=factor(time, levels=c("start", "mid", "end")), y=!!sym(gene), group=1))+geom_line(linetype="dashed")+geom_point()+theme_bw()+ggtitle("VST counts from Day 0 to Day 28")+ylim(0,20)
-print(p)
-}
-
-
-## Pooling of Patient1 FL with Patient3 NL and comparing to Non-lesional
-# Start points
-aldara_start <- rbind(start1_FL_Aldara, start3_NL_Aldara)
-pooled_start <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = aldara_start, Brain_aldara_counts = BRAIN_Aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN)
-aldara_end <- rbind(end1_FL_Aldara, end3_NL_Aldara)
-pooled_end <- aldara_brain_comparison(brain_samples = non_lesional_samples, aldara_sample = aldara_end, Brain_aldara_counts = BRAIN_Aldara_counts, genes = genes_filtered_named_counts_Aldara_BRAIN)
-volcanoPlot(pooled_end, fdr=0.05, l2fc_cutoff = 1, title = "")
-enrichment_pooled_start <- computeEnrichments(comparison = pooled_start,pathways = shorter_pathways, "pooled_start")
-enrichment_pooled_end <- computeEnrichments(comparison = pooled_end, pathways = shorter_pathways, "pooled_end")
-
-## Aldara End comparisons
-Aldara_end_samples <- aldara_samples %>% filter(time == "end")
-Aldara_end_counts <- Aldara_raw_count_filt[,Aldara_end_samples$sampleID]
-y <- DGEList(counts = Aldara_end_counts, samples = Aldara_end_samples, genes = rownames(Aldara_end_counts))
-Aldara_end_samples$group <- 0
-Aldara_end_samples <- Aldara_end_samples %>% mutate(group = if_else(label == "3endFL", 1, group))
-Aldara_end_samples$group <- as.factor(Aldara_end_samples$group)
-grouping <- Aldara_end_samples$group
-design <- model.matrix(~0 + grouping)
-keep <- filterByExpr(y, design = design)
-y <- y[keep,,keep.lib.sizes=FALSE]
-y <- calcNormFactors(y)
-y <- estimateDisp(y, design=design)
-fit <- glmFit(y, design=design)
-my.contrast <- makeContrasts(endFL3vsendRest = grouping1 - grouping0,levels = colnames(design))
-lrt <- glmLRT(fit, contrast = my.contrast[,"endFL3vsendRest"])
-end_result <- data.frame(lrt$table)
-end_result$padj <- p.adjust(end_result$PValue, method = "BH")
-end_result <-  end_result %>% rename(log2FoldChange=logFC)
-end_result <- end_result %>% rownames_to_column(var = "ensembl_id")
-end_result$ensembl_id <- gsub("\\..*", "", end_result$ensembl_id)
-end_result <- merge(end_result, geneDescription[,c("external_gene_name", "ensembl_gene_id")], by.x ="ensembl_id", by.y="ensembl_gene_id") %>% rename(Gene_name = external_gene_name)
-volcanoPlot(end_result, fdr = 0.05, l2fc_cutoff = 1, title = "Pat3FL end vs. Pat3NL end and Pat1FL end")
+volcanoPlotWithList(Pat3_FL_end_Pat3_NL_end, l2fc_cutoff = 1, fdr = 0.05, title = "Pat3 end FL vs. Pat3 end NL", gene_list = pso_genes)
