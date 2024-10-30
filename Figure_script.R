@@ -34,6 +34,14 @@ volcanoPlotWithList <- function(result, fdr, l2fc_cutoff=1, title, gene_list){
     geom_vline(xintercept = l2fc_cutoff, linetype="dashed")+
     geom_hline(yintercept = -log10(fdr), linetype="dashed")+
     theme_bw()+
+    theme(
+      panel.border = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(colour = "black"),
+      axis.line.x = element_line(colour = "black"),
+      axis.line.y = element_line(colour = "black")
+    )+
     ggtitle(title)
 }
 
